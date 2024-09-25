@@ -1,5 +1,7 @@
 # %%
 import os
+import re
+import streamlit as st
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -32,7 +34,8 @@ class UserInfo(BaseModel):
 
 class ProductInfo(BaseModel):
     '''Information about a product purchase.'''
-    product_name: Optional[str] = Field(default=None, description='The name of the product')
+    name: Optional[str] = Field(default=None, description='The name of the product')
+    price: Optional[str] = Field(default=None, description='The price of the product')
     number: Optional[int] = Field(default=1, description='The number of products to purchase')
 
 # Create the extraction chain
@@ -71,14 +74,6 @@ def extract_and_write_user_info(text: str) -> str:
         new_member = db_manager.get_member_by_name(user_info.name)
         return f'Extracted and wrote user info: {new_member}'
 
-extract_and_write_tool = StructuredTool.from_function(
-    func=extract_and_write_user_info,
-    name='ExtractAndWriteUserInfo',
-    description='Extract user information from text and write it to SQLite database',
-    args_schema=ExtractAndWriteInput,
-    return_direct=True,
-)
-
 # %%
 # Define the tool for extracting user info and fetching purchase records
 class PurchaseRecordInput(BaseModel):
@@ -104,13 +99,6 @@ def extract_and_get_purchase_record(text: str) -> str:
     
     return response
 
-purchase_record_tool = StructuredTool.from_function(
-    func=extract_and_get_purchase_record,
-    name='PurchaseRecordFetcher',
-    description='Extract user information from text and fetch purchase records from SQLite database',
-    args_schema=PurchaseRecordInput,
-    return_direct=True,
-)
 # %%
 # Define the tool for purchasing
 class PurchaseInput(BaseModel):
@@ -123,7 +111,7 @@ def extract_and_purchase(text: str) -> str:
 
     if user_info.name is None:
         return "User information is incomplete."
-    if product_info.product_name is None:
+    if product_info.name is None:
         return "Product information is incomplete."
 
     member = db_manager.get_member_by_name(user_info.name)
@@ -136,22 +124,14 @@ def extract_and_purchase(text: str) -> str:
     member_id = member[0]
     
     # Execute purchase
-    product = db_manager.get_product_by_name(product_info.product_name)
+    product = db_manager.get_product_by_name(product_info.name)
     if not product:
-        return f"Sorry, the product '{product_info.product_name}' does not exist."
+        return f"Sorry, the product '{product_info.name}' does not exist."
 
     product_id = product[0]
     db_manager.insert_record(member_id, product_id, product_info.number)
 
-    return f"Purchase successful! Member {user_info.name} bought {product_info.number} {product_info.product_name}(s)."
-
-purchase_tool = StructuredTool.from_function(
-    func=extract_and_purchase,
-    name='Purchase',
-    description='Extract user and purchase information from text and execute the purchase',
-    args_schema=PurchaseInput,
-    return_direct=True,
-)
+    return f"Purchase successful! Member {user_info.name} bought {product_info.number} {product_info.name}(s)."
 
 # %%
 class ViewAllProductsInput(BaseModel):
@@ -163,14 +143,6 @@ def view_all_products() -> str:
     
     return products
 
-view_all_products_tool = StructuredTool.from_function(
-    func=view_all_products,
-    name='ViewAllProducts',
-    description="View all products in database if user asks about products' information",
-    args_schema=ViewAllProductsInput,
-    return_direct=True,
-)
-
 # %%
 class ViewAllMembersInput(BaseModel):
     pass  # No input required for viewing all members
@@ -181,13 +153,52 @@ def view_all_members() -> str:
     
     return members
 
-view_all_members_tool = StructuredTool.from_function(
-    func=view_all_members,
-    name='ViewAllMembers',
-    description="View all products in database to answer the user if user asks about members' information",
-    args_schema=ViewAllMembersInput,
-    return_direct=True,
-)
+# %%
+# Create tools with current descriptions
+def create_default_tools():
+    extract_and_write_tool = StructuredTool.from_function(
+        func=extract_and_write_user_info,
+        name='ExtractAndWriteUserInfo',
+        description='Extract user information from text and write it to SQLite database',
+        args_schema=ExtractAndWriteInput,
+        return_direct=True,
+    )
+
+    view_all_members_tool = StructuredTool.from_function(
+        func=view_all_members,
+        name='ViewAllMembers',
+        description="View all products in database to answer the user if user asks about members' information",
+        args_schema=ViewAllMembersInput,
+        return_direct=True,
+    )
+
+    view_all_products_tool = StructuredTool.from_function(
+        func=view_all_products,
+        name='ViewAllProducts',
+        description="View all products in database if user asks about products' information",
+        args_schema=ViewAllProductsInput,
+        return_direct=True,
+    )
+
+
+    purchase_tool = StructuredTool.from_function(
+        func=extract_and_purchase,
+        name='Purchase',
+        description='Extract user and purchase information from text and execute the purchase',
+        args_schema=PurchaseInput,
+        return_direct=True,
+    )
+
+    purchase_record_tool = StructuredTool.from_function(
+        func=extract_and_get_purchase_record,
+        name='PurchaseRecordFetcher',
+        description='Extract user information from text and fetch purchase records from SQLite database',
+        args_schema=PurchaseRecordInput,
+        return_direct=True,
+    )
+
+
+    return [extract_and_write_tool, purchase_record_tool, purchase_tool, view_all_members_tool, view_all_products_tool]
 
 # %%
 system_prompt = '''You are a helpful and friendly AI agent designed to assist users with tasks related to managing customer and product information in an SQLite database.
@@ -202,9 +213,171 @@ Remember to:
 - Provide helpful explanations after using the tools, summarizing the outcome or offering next steps.
 - Avoid technical jargon unless the user seems to expect or request it.
 '''
+
+# %%
+# Recreate agent
+def recreate_agent(new_tool: StructuredTool=None):
+    tools =  st.session_state.tools
+    for tool in tools:
+        if tool.name in st.session_state.tool_descriptions:
+            tool.description = st.session_state.tool_descriptions[tool.name]
+    
+    if new_tool:
+        st.session_state.tool_descriptions[new_tool.name] = new_tool.description
+        st.session_state.tools.append(new_tool)
+
+    return create_react_agent(openai, st.session_state.tools, state_modifier=system_prompt)
+
+def create_tool_from_code(code: str) -> StructuredTool:
+    db_manager_code = """import sqlite3
+import pandas as pd
+
+class DBManager:
+    def __init__(self, db_name='customer_database.db'):
+        # Connect to the database
+        self.db_name = db_name
+        self.conn = sqlite3.connect(self.db_name, check_same_thread=False)
+        self.cursor = self.conn.cursor()
+
+    def create_tables(self):
+        # Create 'member', 'product', and 'record' tables
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS member (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            age INTEGER NOT NULL
+        )
+        ''')
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS product (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            price REAL NOT NULL
+        )
+        ''')
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS record (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            member_id INTEGER,
+            product_id INTEGER,
+            number INTEGER,
+            FOREIGN KEY (member_id) REFERENCES member(id),
+            FOREIGN KEY (product_id) REFERENCES product(id)
+        )
+        ''')
+        self.conn.commit()
+        # Check if member table is empty
+        self.cursor.execute('SELECT COUNT(*) FROM member')
+        if self.cursor.fetchone()[0] == 0:
+            self.insert_example_data()
+
+    def insert_example_data(self):
+        # Insert some example members
+        members = [
+            ('Alice Johnson', 'alice@example.com', 25),
+            ('Bob Smith', 'bob@example.com', 30),
+            ('Charlie Brown', 'charlie@example.com', 22)
+        ]
+        self.cursor.executemany("INSERT INTO member (name, email, age) VALUES (?, ?, ?)", members)
+        
+        # Insert some example products
+        products = [
+            ('Laptop', 999.99),
+            ('Smartphone', 499.99),
+            ('Headphones', 199.99)
+        ]
+        self.cursor.executemany("INSERT INTO product (name, price) VALUES (?, ?)", products)
+
+        # Insert some example records
+        records = [
+            (1, 1, 1),  # Alice buys 1 Laptop
+            (2, 2, 2),  # Bob buys 2 Smartphones
+            (3, 3, 3)   # Charlie buys 3 Headphones
+        ]
+        self.cursor.executemany("INSERT INTO record (member_id, product_id, number) VALUES (?, ?, ?)", records)
+        
+        self.conn.commit()
+
+    def insert_member(self, name, email, age):
+        # Insert a new member
+        self.cursor.execute("INSERT INTO member (name, email, age) VALUES (?, ?, ?)", (name, email, age))
+        self.conn.commit()
+
+    def insert_product(self, name, price):
+        # Insert a new product
+        self.cursor.execute("INSERT INTO product (name, price) VALUES (?, ?)", (name, price))
+        self.conn.commit()
+
+    def insert_record(self, member_id, product_id, number):
+        # Insert a new purchase record
+        self.cursor.execute("INSERT INTO record (member_id, product_id, number) VALUES (?, ?, ?)", (member_id, product_id, number))
+        self.conn.commit()
+
+    def get_member_by_name(self, name):
+        # Find a member by name
+        self.cursor.execute("SELECT * FROM member WHERE name = ?", (name,))
+        return self.cursor.fetchone()
+
+    def get_product_by_name(self, product_name):
+        # Find a product by name
+        self.cursor.execute("SELECT * FROM product WHERE name = ?", (product_name,))
+        return self.cursor.fetchone()
+
+    def get_member_records(self, member_id):
+        # Retrieve all records for a specific member
+        self.cursor.execute('''
+        SELECT record.id, product.name, product.price, record.number, product.price*record.number
+        FROM record 
+        JOIN product ON record.product_id = product.id
+        WHERE record.member_id = ?
+        ''', (member_id,))
+        return self.cursor.fetchall()
+    
+    def list_all_members(self):
+        # Retrieve all members
+        return pd.read_sql_query("SELECT * FROM member", self.conn)
+    
+    def list_all_products(self):
+        # Retrieve all products
+        return pd.read_sql_query("SELECT * FROM product", self.conn)
+    
+    def list_all_records(self):
+        # Retrieve all records
+        return pd.read_sql_query('''
+        SELECT record.id, member.name AS member_name, product.name AS product_name, record.number 
+        FROM record 
+        JOIN member ON record.member_id = member.id 
+        JOIN product ON record.product_id = product.id
+        ''', self.conn)
+
+    def close(self):
+        # Close the database connection
+        self.conn.close()\n\n"""
+    new_tool_code = re.search(r'(new_tool\s*=\s*StructuredTool\.from_function\(.+?\))', code, re.DOTALL).group(1)
+
+    func_name = re.search(r'func=(\w+)', new_tool_code).group(1)
+    schema_name = re.search(r'args_schema=(\w+)', new_tool_code).group(1)
+    tool_name = re.search(r"name='(.+?)'", new_tool_code).group(1)
+    description = re.search(r"description='(.+?)'", new_tool_code).group(1)
+
+    code = db_manager_code + code
+
+    exec(code, globals())
+
+    if func_name in globals() and schema_name in globals():
+        new_tool = StructuredTool.from_function(
+            func=globals()[func_name],
+            name=tool_name,
+            description=description,
+            args_schema=globals()[schema_name],
+            return_direct=True
+        )
+        return new_tool
+    else:
+        raise ValueError(f"Provided function {func_name} or schema {schema_name} not found in the code.")
 # %%
 # Create the agent
-# tools = [extract_and_write_tool, purchase_record_tool, purchase_tool, view_all_members_tool, view_all_products_tool]
 # agent = create_react_agent(openai, tools, state_modifier=system_prompt)
 # %%
 # Function to handle user messages

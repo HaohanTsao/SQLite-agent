@@ -2,7 +2,7 @@ import sqlite3
 import pandas as pd
 
 class DBManager:
-    def __init__(self, db_name='example.db'):
+    def __init__(self, db_name='customer_database.db'):
         # Connect to the database
         self.db_name = db_name
         self.conn = sqlite3.connect(self.db_name, check_same_thread=False)

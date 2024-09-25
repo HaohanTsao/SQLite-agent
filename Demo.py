@@ -3,20 +3,10 @@ import streamlit as st
 import sqlite3
 import altair as alt
 from langchain_core.messages import HumanMessage
-from langchain.tools import StructuredTool
-from langgraph.prebuilt import create_react_agent
 from backend.db_manager import DBManager
 from backend.sqlite_agent import (
-    extract_and_write_user_info, 
-    extract_and_get_purchase_record, 
-    extract_and_purchase,
-    view_all_members,
-    view_all_products,
-    ExtractAndWriteInput, 
-    PurchaseRecordInput, 
-    PurchaseInput,
-    ViewAllMembersInput,
-    ViewAllProductsInput,
+    recreate_agent,
+    create_default_tools,
     openai,
     system_prompt
 ) 
@@ -28,12 +18,10 @@ if 'data' not in st.session_state:
     st.session_state.data = None
 if 'messages' not in st.session_state:
     st.session_state.messages = []
+if 'tools' not in st.session_state:
+    st.session_state.tools = create_default_tools()
 if 'tool_descriptions' not in st.session_state:
-    st.session_state.tool_descriptions = {
-        'ExtractAndWriteUserInfo': 'Extract user information from text and write it to SQLite database',
-        'PurchaseRecordFetcher': 'Extract user information from text and fetch purchase records from SQLite database',
-        'Purchase': 'Extract user and purchase information from text and execute the purchase'
-    }
+    st.session_state.tool_descriptions = {tool.name: tool.description for tool in st.session_state.tools}
 
 # Load data from database
 def load_data():
@@ -50,51 +38,6 @@ def refresh_data():
 # Load initial data if not loaded
 if st.session_state.data is None:
     refresh_data()
-
-# Create tools with current descriptions
-def create_tools():
-    return [
-        StructuredTool.from_function(
-            func=extract_and_write_user_info,
-            name='ExtractAndWriteUserInfo',
-            description=st.session_state.tool_descriptions['ExtractAndWriteUserInfo'],
-            args_schema=ExtractAndWriteInput,
-            return_direct=True,
-        ),
-        StructuredTool.from_function(
-            func=extract_and_get_purchase_record,
-            name='PurchaseRecordFetcher',
-            description=st.session_state.tool_descriptions['PurchaseRecordFetcher'],
-            args_schema=PurchaseRecordInput,
-            return_direct=True,
-        ),
-        StructuredTool.from_function(
-            func=extract_and_purchase,
-            name='Purchase',
-            description=st.session_state.tool_descriptions['Purchase'],
-            args_schema=PurchaseInput,
-            return_direct=True,
-        ),
-        StructuredTool.from_function(
-            func=view_all_members,
-            name='ViewAllMembers',
-            description="View all members in database if user asks about members' information",
-            args_schema=ViewAllMembersInput,
-            return_direct=True,
-        ),
-        StructuredTool.from_function(
-            func=view_all_products,
-            name='ViewAllProducts',
-            description="View all products in database if user asks about products' information",
-            args_schema=ViewAllProductsInput,
-            return_direct=True,
-        )
-    ]
-
-# Recreate agent
-def recreate_agent():
-    tools = create_tools()
-    return create_react_agent(openai, tools)
 
 # Initialize agent
 if 'agent' not in st.session_state:
@@ -235,6 +178,7 @@ if prompt:
                     response += '\n\n' + step_response
             
             st.session_state.messages.append({"role": "assistant", "content": response})
+            st.rerun()
 
 # Style the UI with more spacing and visual separation
 st.markdown("<style> .stMarkdown { margin-bottom: 2rem !important; } </style>", unsafe_allow_html=True)
