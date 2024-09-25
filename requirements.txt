@@ -1,7 +1,7 @@
-streamlit
-langchain
+streamlit==1.38.0
+langchain==0.3.0
+langgraph==0.2.21
 langchain_openai
 pydantic
 python-dotenv
-langgraph
 pandas

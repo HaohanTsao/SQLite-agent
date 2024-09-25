@@ -17,7 +17,8 @@ from backend.sqlite_agent import (
     PurchaseInput,
     ViewAllMembersInput,
     ViewAllProductsInput,
-    openai
+    openai,
+    system_prompt
 ) 
 
 st.set_page_config(layout="wide")
@@ -93,7 +94,7 @@ def create_tools():
 # Recreate agent
 def recreate_agent():
     tools = create_tools()
-    return create_react_agent(openai, tools)
+    return create_react_agent(openai, tools, state_modifier=system_prompt)
 
 # Initialize agent
 if 'agent' not in st.session_state:

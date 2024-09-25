@@ -12,7 +12,8 @@ from backend.sqlite_agent import (
     PurchaseInput,
     ViewAllMembersInput,
     ViewAllProductsInput,
-    openai
+    openai,
+    system_prompt
 ) 
 
 # 設定頁面配置
@@ -96,7 +97,7 @@ def create_tools():
 # Function to recreate agent with updated tools
 def recreate_agent():
     tools = create_tools()
-    agent = create_react_agent(openai, tools)
+    agent = create_react_agent(openai, tools, state_modifier=system_prompt)
     return agent
 
 # 用 Streamlit 的列佈局來控制排版

@@ -160,13 +160,6 @@ class ViewAllProductsInput(BaseModel):
 def view_all_products() -> str:
     '''Return all products from the SQLite database.'''
     products = db_manager.list_all_products()
-    print(products)
-    # if not products:
-    #     return "No products found in the database."
-    
-    # response = "Products:\n"
-    # for product in products:
-    #     response += f"- Product ID: {product[0]}, Name: {product[1]}, Price: ${product[2]}\n"
     
     return products
 
@@ -186,27 +179,33 @@ def view_all_members() -> str:
     '''Return all members from the SQLite database.'''
     members = db_manager.list_all_members()
     
-    # if not members:
-    #     return "No members found in the database."
-    
-    # response = "Members:\n"
-    # for member in members:
-    #     response += f"- Member ID: {member[0]}, Name: {member[1]}, Email: {member[2]}, Age: {member[3]}\n"
-    
     return members
 
 view_all_members_tool = StructuredTool.from_function(
     func=view_all_members,
     name='ViewAllMembers',
-    description="View all products in database if user asks about members' information",
+    description="View all products in database to answer the user if user asks about members' information",
     args_schema=ViewAllMembersInput,
     return_direct=True,
 )
 
 # %%
+system_prompt = '''You are a helpful and friendly AI agent designed to assist users with tasks related to managing customer and product information in an SQLite database.
+
+When a user asks you a question, always respond in a polite and friendly manner, guiding them through the process if necessary. If their request requires using one of your tools, call the tool and explain the results clearly and accurately. If the user’s input is unclear, kindly ask them to clarify or provide more information.
+
+When returning information from the database, present it in an easy-to-understand format. If no relevant data is found, respond in a reassuring and supportive way, encouraging the user to try again or offer additional assistance.
+
+Remember to:
+- Always maintain a positive and friendly tone.
+- Be patient with users and ensure they feel supported throughout their interaction.
+- Provide helpful explanations after using the tools, summarizing the outcome or offering next steps.
+- Avoid technical jargon unless the user seems to expect or request it.
+'''
+# %%
 # Create the agent
 # tools = [extract_and_write_tool, purchase_record_tool, purchase_tool, view_all_members_tool, view_all_products_tool]
-# agent = create_react_agent(openai, tools)
+# agent = create_react_agent(openai, tools, state_modifier=system_prompt)
 # %%
 # Function to handle user messages
 # def process_user_message(message):
@@ -214,7 +213,7 @@ view_all_members_tool = StructuredTool.from_function(
 #         {'messages': [HumanMessage(content=message)]},
 #         stream_mode="values",
 #     )
-    
+#     responses = []
 #     for event in events:
 #         event["messages"][-1].pretty_print()
 #         responses.append(event["messages"][-1])
@@ -222,8 +221,8 @@ view_all_members_tool = StructuredTool.from_function(
 #     return responses
 
 # %%
-# # Insert member usage
-# user_message = "Alice Johnson is a member. Tell me how old is he"
+# Insert member usage
+# user_message = "A new member, Tedy Tsao, 22, dkk94729@gmail.com"
 # process_user_message(message=user_message)
 
 # %%
