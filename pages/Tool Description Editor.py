@@ -97,7 +97,7 @@ def create_tools():
 # Function to recreate agent with updated tools
 def recreate_agent():
     tools = create_tools()
-    agent = create_react_agent(openai, tools, state_modifier=system_prompt)
+    agent = create_react_agent(openai, tools)
     return agent
 
 # 用 Streamlit 的列佈局來控制排版

@@ -94,7 +94,7 @@ def create_tools():
 # Recreate agent
 def recreate_agent():
     tools = create_tools()
-    return create_react_agent(openai, tools, state_modifier=system_prompt)
+    return create_react_agent(openai, tools)
 
 # Initialize agent
 if 'agent' not in st.session_state:
@@ -108,32 +108,6 @@ with col1:
     try:
         # Use data from session state
         members, products, records = st.session_state.data
-
-        # Product table
-        st.markdown("<h2>📦 Product Table</h2>", unsafe_allow_html=True)
-        selected_products = st.multiselect(
-            "Choose Products", list(products['name'].unique()), list(products['name'].unique())[:2],
-            help="Select products to view from the table"
-        )
-        
-        if not selected_products:
-            st.error("Please select at least one product")
-        else:
-            product_frame = products[products['name'].isin(selected_products)]
-            st.dataframe(product_frame, use_container_width=True)
-
-        # Member table
-        st.markdown("<h2>👥 Member Table</h2>", unsafe_allow_html=True)
-        selected_members = st.multiselect(
-            "Choose Members", list(members['name'].unique()), list(members['name'].unique())[:2],
-            help="Select members to view from the table"
-        )
-        
-        if not selected_members:
-            st.error("Please select at least one member")
-        else:
-            member_frame = members[members['name'].isin(selected_members)]
-            st.dataframe(member_frame, use_container_width=True)
 
         # Purchase records
         st.markdown("<h2>🛒 Purchase Records</h2>", unsafe_allow_html=True)
@@ -163,6 +137,32 @@ with col1:
                 )
             )
             st.altair_chart(chart, use_container_width=True)
+
+        # Product table
+        st.markdown("<h2>📦 Product Table</h2>", unsafe_allow_html=True)
+        selected_products = st.multiselect(
+            "Choose Products", list(products['name'].unique()), list(products['name'].unique())[:2],
+            help="Select products to view from the table"
+        )
+        
+        if not selected_products:
+            st.error("Please select at least one product")
+        else:
+            product_frame = products[products['name'].isin(selected_products)]
+            st.dataframe(product_frame, use_container_width=True)
+
+        # Member table
+        st.markdown("<h2>👥 Member Table</h2>", unsafe_allow_html=True)
+        selected_members = st.multiselect(
+            "Choose Members", list(members['name'].unique()), list(members['name'].unique())[:2],
+            help="Select members to view from the table"
+        )
+        
+        if not selected_members:
+            st.error("Please select at least one member")
+        else:
+            member_frame = members[members['name'].isin(selected_members)]
+            st.dataframe(member_frame, use_container_width=True)
 
     except sqlite3.Error as e:
         st.error(f"Database connection error: {e}")
