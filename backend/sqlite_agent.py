@@ -376,35 +376,18 @@ class DBManager:
         return new_tool
     else:
         raise ValueError(f"Provided function {func_name} or schema {schema_name} not found in the code.")
-# %%
-# Create the agent
-# agent = create_react_agent(openai, tools, state_modifier=system_prompt)
+
 # %%
 # Function to handle user messages
-# def process_user_message(message):
-#     events = agent.stream(
-#         {'messages': [HumanMessage(content=message)]},
-#         stream_mode="values",
-#     )
-#     responses = []
-#     for event in events:
-#         event["messages"][-1].pretty_print()
-#         responses.append(event["messages"][-1])
+def process_user_message(message):
+    agent = recreate_agent()
+    events = agent.stream(
+        {'messages': [HumanMessage(content=message)]},
+        stream_mode="values",
+    )
+    responses = []
+    for event in events:
+        event["messages"][-1].pretty_print()
+        responses.append(event["messages"][-1])
 
-#     return responses
-
-# %%
-# Insert member usage
-# user_message = "A new member, Tedy Tsao, 22, dkk94729@gmail.com"
-# process_user_message(message=user_message)
-
-# %%
-# # Get records usage
-# user_message = "My name is Andy Tsao, show me my purchase records"
-# process_user_message(message=user_message)
-
-# # %%
-# # Purchase usage
-# user_message = "My name is Andy Tsao, I want to buy 3 iPhone16"
-# process_user_message(message=user_message)
-# %%
+    return responses
