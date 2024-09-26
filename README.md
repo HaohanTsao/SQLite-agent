@@ -86,3 +86,5 @@ Here are a few examples of how to interact with the agent:
 If you'd like to add more functionalities or modify the current ones, you can directly edit the corresponding tools and chains in the `sqlite_agent.py` file in the `backend` folder. The `DBManager` class in `db_manager.py` provides functions for interacting with the SQLite database, which can be extended based on your project requirements.
 
 **Note**: New feature that allows users to create their own tools. Navigate to the 'Tool Developer' tab and follow the instructions and examples provided there.
+<img width="1420" alt="截圖 2024-09-26 上午10 48 10" src="https://github.com/user-attachments/assets/fbdd5ad3-0db6-4d9d-bd90-fa8ecdb7dbae">
+
