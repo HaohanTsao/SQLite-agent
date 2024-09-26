@@ -24,8 +24,7 @@ Follow these steps to set up and run the `SQLite-agent`:
 ### 1. Clone the Repository
 
 ```bash
-git clone <repository-url>
-cd SQLite-agent
+git clone https://github.com/HaohanTsao/SQLite-agent.git
 ```
 
 ### 2. Install Dependencies
