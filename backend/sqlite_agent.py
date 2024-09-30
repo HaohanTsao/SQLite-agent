@@ -1,34 +1,17 @@
 # %%
-import os
 import re
+import boto3
 import streamlit as st
-from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from typing import Optional
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
+from langchain_community.chat_models import BedrockChat
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import StructuredTool
-from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
 
 from backend.db_manager import DBManager
-
-load_dotenv()
-
-# %%
-# Initialize OpenAI
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai = ChatOpenAI(
-    api_key=OPENAI_API_KEY,
-    model="gpt-4o-mini",
-    max_tokens=None,
-    timeout=None,
-)
-ollama = ChatOllama(
-    model="llama3.2",
-    temperature=0,
-)
 
 
 # %%
@@ -67,12 +50,20 @@ extraction_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-member_extraction_chain = extraction_prompt | ollama.with_structured_output(
-    schema=UserInfo
-)
-product_extraction_chain = extraction_prompt | ollama.with_structured_output(
-    schema=ProductInfo
-)
+
+def create_extraction_chain(llm):
+    member_extraction_chain = extraction_prompt | llm.with_structured_output(
+        schema=UserInfo
+    )
+    product_extraction_chain = extraction_prompt | llm.with_structured_output(
+        schema=ProductInfo
+    )
+
+    return {
+        "member_extraction_chain": member_extraction_chain,
+        "product_extraction_chain": product_extraction_chain,
+    }
+
 
 # %%
 # Initialize DBManager
@@ -86,9 +77,9 @@ class ExtractAndWriteInput(BaseModel):
     text: str = Field(description="The text containing user information")
 
 
-def extract_and_write_user_info(text: str) -> str:
+def extract_and_write_user_info(text: str, extraction_chain) -> str:
     """Extract user information and write it to SQLite database."""
-    user_info = member_extraction_chain.invoke({"text": text})
+    user_info = extraction_chain["member_extraction_chain"].invoke({"text": text})
     member = db_manager.get_member_by_name(user_info.name)
     if member:
         return f"Member {user_info.name} already exists with ID: {member[0]}"
@@ -104,9 +95,9 @@ class PurchaseRecordInput(BaseModel):
     text: str = Field(description="The text containing user information")
 
 
-def extract_and_get_purchase_record(text: str) -> str:
+def extract_and_get_purchase_record(text: str, extraction_chain) -> str:
     """Extract user information and return their purchase records from SQLite database."""
-    user_info = member_extraction_chain.invoke({"text": text})
+    user_info = extraction_chain["member_extraction_chain"].invoke({"text": text})
     member = db_manager.get_member_by_name(user_info.name)
 
     if not member:
@@ -133,10 +124,11 @@ class PurchaseInput(BaseModel):
     text: str = Field(description="The text containing user and purchase information")
 
 
-def extract_and_purchase(text: str) -> str:
+def extract_and_purchase(text: str, extraction_chain) -> str:
     """Extract user and purchase information, write it to SQLite database if necessary, and execute the purchase."""
-    user_info = member_extraction_chain.invoke({"text": text})
-    product_info = product_extraction_chain.invoke({"text": text})
+
+    user_info = extraction_chain["member_extraction_chain"].invoke({"text": text})
+    product_info = extraction_chain["product_extraction_chain"].invoke({"text": text})
 
     if user_info.name is None:
         return "User information is incomplete."
@@ -189,9 +181,9 @@ def view_all_members() -> str:
 
 # %%
 # Create tools with current descriptions
-def create_default_tools():
+def create_default_tools(extraction_chain):
     extract_and_write_tool = StructuredTool.from_function(
-        func=extract_and_write_user_info,
+        func=lambda text: extract_and_write_user_info(text, extraction_chain),
         name="ExtractAndWriteUserInfo",
         description="Extract user information from text and write it to SQLite database",
         args_schema=ExtractAndWriteInput,
@@ -215,7 +207,7 @@ def create_default_tools():
     )
 
     purchase_tool = StructuredTool.from_function(
-        func=extract_and_purchase,
+        func=lambda text: extract_and_purchase(text, extraction_chain),
         name="Purchase",
         description="Call this tool when the user wants to purchase an item. The tool will handle extracting product information from the input and completing the purchase process.",
         args_schema=PurchaseInput,
@@ -223,7 +215,7 @@ def create_default_tools():
     )
 
     purchase_record_tool = StructuredTool.from_function(
-        func=extract_and_get_purchase_record,
+        func=lambda text: extract_and_get_purchase_record(text, extraction_chain),
         name="PurchaseRecordFetcher",
         description="Extract user information from text and fetch purchase records from SQLite database",
         args_schema=PurchaseRecordInput,
@@ -255,13 +247,36 @@ Remember to:
 
 
 # %%
-# Recreate agent
-def recreate_agent(new_tool: StructuredTool = None, llm: str = "openai"):
-    if llm == "openai":
-        llm = openai
-    elif llm == "ollama":
-        llm = ollama
+def create_llm(provider: str, model_args: dict):
+    if provider == "OpenAI":
+        llm = ChatOpenAI(
+            api_key=model_args["api_key"],
+            model=model_args["model_name"],
+            max_tokens=None,
+            timeout=None,
+        )
+    elif provider == "Ollama":
+        llm = ChatOllama(
+            model=model_args["model_name"],
+            temperature=0,
+        )
+    elif provider == "Bedrock":
+        boto3_config = {
+            "region_name": model_args["aws_region"],
+            "aws_access_key_id": model_args["aws_access_key"],
+            "aws_secret_access_key": model_args["aws_secret_key"],
+        }
+        llm = BedrockChat(
+            client=boto3.client("bedrock-runtime", **boto3_config),
+            provider="anthropic",
+            model_id=model_args["model_name"],
+        )
 
+    return llm
+
+
+# Recreate agent
+def recreate_agent(new_tool: StructuredTool = None):
     tools = st.session_state.tools
     for tool in tools:
         if tool.name in st.session_state.tool_descriptions:
@@ -271,7 +286,9 @@ def recreate_agent(new_tool: StructuredTool = None, llm: str = "openai"):
         st.session_state.tool_descriptions[new_tool.name] = new_tool.description
         st.session_state.tools.append(new_tool)
 
-    return create_react_agent(llm, st.session_state.tools, state_modifier=system_prompt)
+    return create_react_agent(
+        st.session_state.llm, st.session_state.tools, state_modifier=system_prompt
+    )
 
 
 def create_tool_from_code(code: str) -> StructuredTool:
@@ -430,22 +447,21 @@ class DBManager:
 
 # %%
 # Function to handle user messages
-tools = create_default_tools()
-
+# tools = create_default_tools()
 
 # %%
-def process_user_message(message, llm):
-    agent = create_react_agent(model=llm, tools=tools, state_modifier=system_prompt)
-    events = agent.stream(
-        {"messages": [HumanMessage(content=message)]},
-        stream_mode="values",
-    )
-    responses = []
-    for event in events:
-        event["messages"][-1].pretty_print()
-        responses.append(event["messages"][-1])
+# def process_user_message(message, llm):
+#     agent = create_react_agent(model=llm, tools=tools, state_modifier=system_prompt)
+#     events = agent.stream(
+#         {"messages": [HumanMessage(content=message)]},
+#         stream_mode="values",
+#     )
+#     responses = []
+#     for event in events:
+#         event["messages"][-1].pretty_print()
+#         responses.append(event["messages"][-1])
 
-    return responses
+#     return responses
 
 
 # %%

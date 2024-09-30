@@ -173,10 +173,45 @@ st.write("Here is an example of how to build a `InsertProduct` tool.")
 
 st.code(
     """
-from pydantic import BaseModel, Field        
+from pydantic import BaseModel, Field
+import streamlit as st
 from langchain_core.tools import StructuredTool
-        
+from langchain_openai import ChatOpenAI
+
 db_manager = DBManager()
+
+llm = ChatOpenAI(
+    api_key='your_api_key',
+    model='gpt-4o-mini',
+    max_tokens=None,
+    timeout=None
+)
+
+class ProductInfo(BaseModel):
+    '''Information about a product purchase.'''
+
+    name: Optional[str] = Field(default=None, description="The name of the product")
+    price: Optional[str] = Field(default=None, description="The price of the product")
+    number: Optional[int] = Field(
+        default=1, description="The number of products to purchase"
+    )
+
+
+# Create the extraction chain
+extraction_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You are an expert extraction algorithm. "
+            "Only extract relevant information from the text. "
+            "If you do not know the value of an attribute asked to extract, "
+            "return null for the attribute's value.",
+        ),
+        ("human", "{text}"),
+    ]
+)
+
+product_extraction_chain = extraction_prompt | llm.with_structured_output(schema=ProductInfo)
 
 # Define the tool for extracting and inserting product info
 class InsertProductInput(BaseModel):
@@ -186,7 +221,7 @@ def insert_product(text: str) -> str:
     '''Extract product information from text and insert it into SQLite database.'''
     # Extract product information using the product extraction chain
     product_info = product_extraction_chain.invoke({'text': text})
-    
+
     # Check if the product already exists in the database
     product = db_manager.get_product_by_name(product_info.name)
     if product:

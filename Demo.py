@@ -7,6 +7,8 @@ from backend.db_manager import DBManager
 from backend.sqlite_agent import (
     recreate_agent,
     create_default_tools,
+    create_extraction_chain,
+    create_llm,
 )
 
 st.set_page_config(layout="wide")
@@ -16,12 +18,8 @@ if "data" not in st.session_state:
     st.session_state.data = None
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "tools" not in st.session_state:
-    st.session_state.tools = create_default_tools()
-if "tool_descriptions" not in st.session_state:
-    st.session_state.tool_descriptions = {
-        tool.name: tool.description for tool in st.session_state.tools
-    }
+if "agent_created" not in st.session_state:
+    st.session_state.agent_created = False
 
 
 # Load data from database
@@ -42,9 +40,71 @@ def refresh_data():
 if st.session_state.data is None:
     refresh_data()
 
-# Initialize agent
-if "agent" not in st.session_state:
-    st.session_state.agent = recreate_agent()
+st.sidebar.header("Model Configuration")
+model_provider = st.sidebar.selectbox(
+    "Select Model Provider", ["OpenAI", "Ollama", "Bedrock"]
+)
+
+
+def openai_inputs():
+    api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+    model_name = st.sidebar.text_input("Model Name", value="gpt-4o-mini")
+    return {"api_key": api_key, "model_name": model_name}
+
+
+def ollama_inputs():
+    model_name = st.sidebar.text_input("Model Name", value="llama3.2")
+    st.sidebar.warning(
+        "Please ensure you have pulled the specified model using Ollama locally."
+    )
+    return {"model_name": model_name}
+
+
+def bedrock_inputs():
+    aws_region = st.sidebar.text_input("AWS Region")
+    aws_access_key = st.sidebar.text_input("AWS Access Key", type="password")
+    aws_secret_key = st.sidebar.text_input("AWS Secret Access Key", type="password")
+    model_name = st.sidebar.text_input(
+        "Model Name", value="anthropic.claude-3-5-sonnet-20240620-v1:0"
+    )
+    return {
+        "aws_region": aws_region,
+        "aws_access_key": aws_access_key,
+        "aws_secret_key": aws_secret_key,
+        "model_name": model_name,
+    }
+
+
+# Display appropriate inputs based on selected provider
+if model_provider == "OpenAI":
+    model_args = openai_inputs()
+elif model_provider == "Ollama":
+    model_args = ollama_inputs()
+else:  # Bedrock
+    model_args = bedrock_inputs()
+
+
+def create_agent():
+    with st.spinner("Creating agent..."):
+        st.session_state.llm = create_llm(
+            provider=model_provider, model_args=model_args
+        )
+        st.session_state.extraction_chain = create_extraction_chain(
+            llm=st.session_state.llm
+        )
+        st.session_state.tools = create_default_tools(st.session_state.extraction_chain)
+        st.session_state.tool_descriptions = {
+            tool.name: tool.description for tool in st.session_state.tools
+        }
+        st.session_state.agent = recreate_agent()
+        st.session_state.agent_created = True
+    st.success("Agent created successfully!")
+    st.rerun()
+
+
+# Create Agent button
+if st.sidebar.button("Create Agent"):
+    create_agent()
 
 # App layout
 st.markdown(
@@ -131,26 +191,31 @@ with col1:
     st.button("🔄 Refresh Data", on_click=refresh_data, use_container_width=True)
 
 with col2:
-    st.markdown("<h2>💬 Chat with SQLite Agent!</h2>", unsafe_allow_html=True)
+    if st.session_state.agent_created:
+        st.markdown("<h2>💬 Chat with SQLite Agent!</h2>", unsafe_allow_html=True)
 
-    # Chat container for messages
-    chat_container = st.container()
+        # Chat container for messages
+        chat_container = st.container()
 
-    with chat_container:
-        with st.chat_message("assistant"):
-            st.markdown(
-                "How can I help you today? Try asking me to insert new members into the database or summarize and update one's purchase records."
-            )
+        with chat_container:
+            with st.chat_message("assistant"):
+                st.markdown(
+                    "How can I help you today? Try asking me to insert new members into the database or summarize and update one's purchase records."
+                )
 
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
 
-    def response_generator(response):
-        for word in response:
-            yield word
-            time.sleep(0.01)
+        def response_generator(response):
+            for word in response:
+                yield word
+                time.sleep(0.01)
 
+    else:
+        st.info(
+            "Please create an agent using the 'Create Agent' button in the sidebar to start chatting."
+        )
 
 # Move chat input to the bottom
 prompt = st.chat_input("Type your message here...")

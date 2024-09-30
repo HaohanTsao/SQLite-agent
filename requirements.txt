@@ -3,6 +3,8 @@ langchain==0.3.0
 langgraph==0.2.21
 streamlit-code-editor==0.1.21
 langchain_openai
+langchain_community
+boto3
 pydantic
 python-dotenv
 pandas
