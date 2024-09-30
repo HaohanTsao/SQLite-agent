@@ -5,7 +5,8 @@ from backend.sqlite_agent import recreate_agent
 st.set_page_config(page_title="Tool Description Editor", layout="wide")
 
 # 設置自定義樣式
-st.markdown("""
+st.markdown(
+    """
     <style>
     .stButton > button {
         background-color: #4CAF50;
@@ -33,9 +34,13 @@ st.markdown("""
         box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
     }
     </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-st.markdown("<h1 class='title-header'>Tool Description Editor</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<h1 class='title-header'>Tool Description Editor</h1>", unsafe_allow_html=True
+)
 
 st.write("Edit the descriptions below and click 'Update Agent' to apply changes.")
 
@@ -50,23 +55,26 @@ with col1:
     for tool_name, description in st.session_state.tool_descriptions.items():
         with st.expander(f"`{tool_name}` Description", expanded=True):
             st.session_state.tool_descriptions[tool_name] = st.text_area(
-                label='Type your customized desc',
-                value=description, 
-                key=f"desc_{tool_name}", 
-                height=150
+                label="Type your customized desc",
+                value=description,
+                key=f"desc_{tool_name}",
+                height=150,
             )
 
 # 第二列顯示工具當前的描述以及按鈕操作
 with col2:
     st.write("## Current Tool Descriptions")
     st.markdown("<hr>", unsafe_allow_html=True)
-    
+
     for tool_name, description in st.session_state.tool_descriptions.items():
-        st.markdown(f"""
+        st.markdown(
+            f"""
             <div class="tool-description">
                 <strong>{tool_name}:</strong><br>{description}
             </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     if st.button("Update Agent"):
         st.session_state.agent = recreate_agent()

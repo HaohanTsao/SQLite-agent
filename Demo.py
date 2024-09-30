@@ -7,44 +7,49 @@ from backend.db_manager import DBManager
 from backend.sqlite_agent import (
     recreate_agent,
     create_default_tools,
-    openai,
-    system_prompt
-) 
+)
 
 st.set_page_config(layout="wide")
 
 # Initialize session state
-if 'data' not in st.session_state:
+if "data" not in st.session_state:
     st.session_state.data = None
-if 'messages' not in st.session_state:
+if "messages" not in st.session_state:
     st.session_state.messages = []
-if 'tools' not in st.session_state:
+if "tools" not in st.session_state:
     st.session_state.tools = create_default_tools()
-if 'tool_descriptions' not in st.session_state:
-    st.session_state.tool_descriptions = {tool.name: tool.description for tool in st.session_state.tools}
+if "tool_descriptions" not in st.session_state:
+    st.session_state.tool_descriptions = {
+        tool.name: tool.description for tool in st.session_state.tools
+    }
+
 
 # Load data from database
 def load_data():
-    db_manager = DBManager('customer_database.db')
+    db_manager = DBManager("customer_database.db")
     members = db_manager.list_all_members()
     products = db_manager.list_all_products()
     records = db_manager.list_all_records()
     return members, products, records
 
+
 # Refresh data
 def refresh_data():
     st.session_state.data = load_data()
+
 
 # Load initial data if not loaded
 if st.session_state.data is None:
     refresh_data()
 
 # Initialize agent
-if 'agent' not in st.session_state:
+if "agent" not in st.session_state:
     st.session_state.agent = recreate_agent()
 
 # App layout
-st.markdown("<h1 style='text-align: center;'>SQLite Agent Demo</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<h1 style='text-align: center;'>SQLite Agent Demo</h1>", unsafe_allow_html=True
+)
 col1, col2 = st.columns(2)
 
 with col1:
@@ -55,28 +60,36 @@ with col1:
         # Purchase records
         st.markdown("<h2>🛒 Purchase Records</h2>", unsafe_allow_html=True)
         countries = st.multiselect(
-            "Choose Members for Purchase Records", list(records['member_name'].unique()), list(records['member_name'].unique())[:2]
+            "Choose Members for Purchase Records",
+            list(records["member_name"].unique()),
+            list(records["member_name"].unique())[:2],
         )
 
         if not countries:
             st.error("Please select at least one member.")
         else:
-            data = records[records['member_name'].isin(countries)]
+            data = records[records["member_name"].isin(countries)]
 
             pivot_data = data.pivot_table(
-                index='member_name', columns='product_name', values='number', aggfunc='sum', fill_value=0
+                index="member_name",
+                columns="product_name",
+                values="number",
+                aggfunc="sum",
+                fill_value=0,
             )
             st.markdown("### Records of Selected Members")
             st.dataframe(pivot_data, use_container_width=True)
 
-            data_melted = pivot_data.reset_index().melt(id_vars='member_name', var_name='Product', value_name='Quantity')
+            data_melted = pivot_data.reset_index().melt(
+                id_vars="member_name", var_name="Product", value_name="Quantity"
+            )
             chart = (
                 alt.Chart(data_melted)
                 .mark_bar()
                 .encode(
-                    x='Product:N',
-                    y='Quantity:Q',
-                    color='member_name:N',
+                    x="Product:N",
+                    y="Quantity:Q",
+                    color="member_name:N",
                 )
             )
             st.altair_chart(chart, use_container_width=True)
@@ -84,27 +97,31 @@ with col1:
         # Product table
         st.markdown("<h2>📦 Product Table</h2>", unsafe_allow_html=True)
         selected_products = st.multiselect(
-            "Choose Products", list(products['name'].unique()), list(products['name'].unique())[:2],
-            help="Select products to view from the table"
+            "Choose Products",
+            list(products["name"].unique()),
+            list(products["name"].unique())[:2],
+            help="Select products to view from the table",
         )
-        
+
         if not selected_products:
             st.error("Please select at least one product")
         else:
-            product_frame = products[products['name'].isin(selected_products)]
+            product_frame = products[products["name"].isin(selected_products)]
             st.dataframe(product_frame, use_container_width=True)
 
         # Member table
         st.markdown("<h2>👥 Member Table</h2>", unsafe_allow_html=True)
         selected_members = st.multiselect(
-            "Choose Members", list(members['name'].unique()), list(members['name'].unique())[:2],
-            help="Select members to view from the table"
+            "Choose Members",
+            list(members["name"].unique()),
+            list(members["name"].unique())[:2],
+            help="Select members to view from the table",
         )
-        
+
         if not selected_members:
             st.error("Please select at least one member")
         else:
-            member_frame = members[members['name'].isin(selected_members)]
+            member_frame = members[members["name"].isin(selected_members)]
             st.dataframe(member_frame, use_container_width=True)
 
     except sqlite3.Error as e:
@@ -121,15 +138,19 @@ with col2:
 
     with chat_container:
         with st.chat_message("assistant"):
-            st.markdown("How can I help you today? Try asking me to insert new members into the database or summarize and update one's purchase records.")
-        
+            st.markdown(
+                "How can I help you today? Try asking me to insert new members into the database or summarize and update one's purchase records."
+            )
+
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
+
     def response_generator(response):
         for word in response:
             yield word
             time.sleep(0.01)
+
 
 # Move chat input to the bottom
 prompt = st.chat_input("Type your message here...")
@@ -144,10 +165,12 @@ if prompt:
     # Handle streaming messages
     with chat_container:
         with st.chat_message("assistant"):
-            response = ''
-            for step in st.session_state.agent.stream({'messages': [HumanMessage(content=prompt)]}, stream_mode='updates'):
-                if 'agent' in step:
-                    messages = step['agent']['messages']
+            response = ""
+            for step in st.session_state.agent.stream(
+                {"messages": [HumanMessage(content=prompt)]}, stream_mode="updates"
+            ):
+                if "agent" in step:
+                    messages = step["agent"]["messages"]
                     for message in messages:
                         if message.tool_calls:
                             tool_call = message.tool_calls[0]
@@ -155,30 +178,51 @@ if prompt:
                             st.markdown(step_response)
                         else:
                             step_response = message.content
-                            step_response = st.write_stream(response_generator(step_response))
-                
-                elif 'tools' in step:
-                    messages = step['tools']['messages']
+                            step_response = st.write_stream(
+                                response_generator(step_response)
+                            )
+
+                elif "tools" in step:
+                    messages = step["tools"]["messages"]
                     for message in messages:
-                        if 'tool_call' in locals() and tool_call['name'] in ['ViewAllProducts', 'ViewAllMembers']:
-                            step_response = '**Tool Message:**' + '\n\n' + 'Retrieving data from database...'
-                            step_response = st.write_stream(response_generator(step_response))
+                        if "tool_call" in locals() and tool_call["name"] in [
+                            "ViewAllProducts",
+                            "ViewAllMembers",
+                        ]:
+                            step_response = (
+                                "**Tool Message:**"
+                                + "\n\n"
+                                + "Retrieving data from database..."
+                            )
+                            step_response = st.write_stream(
+                                response_generator(step_response)
+                            )
                         else:
-                            step_response = '**Tool Message:**' + '\n\n' + message.content
-                            step_response = st.write_stream(response_generator(step_response))
+                            step_response = (
+                                "**Tool Message:**" + "\n\n" + message.content
+                            )
+                            step_response = st.write_stream(
+                                response_generator(step_response)
+                            )
+                            refresh_data()
 
                         # refresh data
-                        if 'tool_call' in locals() and tool_call['name'] in ['ExtractAndWriteUserInfo', 'Purchase']:
-                            refresh_data()
+                        if "tool_call" in locals() and tool_call["name"] in [
+                            "ExtractAndWriteUserInfo",
+                            "Purchase",
+                        ]:
                             st.success("Database updated! Data refreshed.")
 
-                if response == '':
+                if response == "":
                     response += step_response
                 else:
-                    response += '\n\n' + step_response
-            
+                    response += "\n\n" + step_response
+
             st.session_state.messages.append({"role": "assistant", "content": response})
             st.rerun()
 
 # Style the UI with more spacing and visual separation
-st.markdown("<style> .stMarkdown { margin-bottom: 2rem !important; } </style>", unsafe_allow_html=True)
+st.markdown(
+    "<style> .stMarkdown { margin-bottom: 2rem !important; } </style>",
+    unsafe_allow_html=True,
+)
