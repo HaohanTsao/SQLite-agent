@@ -28,21 +28,11 @@ To install the required dependencies, run:
 pip install -r requirements.txt
 ```
 
-### 3. Create the .env File
-
-In the root directory of the project, create a `.env` file and add your OpenAI API key.
-
-Here’s an example of how the `.env` file should look:
-
-```bash
-OPENAI_API_KEY=your_openai_api_key_here
-```
-
-### 4. Set Up the SQLite Database
+### 3. Set Up the SQLite Database
 
 You don't need to initialize the SQLite database manually. The database will be built after running the Streamlit app. Initial example data will be included in the database. If you want to reset the database, simply remove the existing database file.
 
-### 5. Running the Streamlit App
+### 4. Running the Streamlit App
 
 After setting up the database, you can launch the Streamlit app to interact with the agent. Run the following command:
 
@@ -52,7 +42,7 @@ streamlit run Demo.py
 
 This will start the app, and you can interact with the SQLite-agent via the provided interface.
 
-### 6. Interacting with the Agent
+### 5. Interacting with the Agent
 
 The `SQLite-agent` provides several tools you can use to interact with the SQLite database:
 
