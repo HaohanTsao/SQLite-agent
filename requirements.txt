@@ -3,6 +3,7 @@ langchain==0.3.0
 langgraph==0.2.21
 streamlit-code-editor==0.1.21
 langchain_openai==0.2.0
+langchain_ollama
 langchain_community
 boto3
 pydantic
