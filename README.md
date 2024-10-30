@@ -60,7 +60,7 @@ Here are a few examples of how to interact with the agent:
   "Add a new member named John Doe, with email john.doe@example.com and age 30."
   
 - **Checking purchase records**:  
-  "What are the purchase records for Jane Smith?"
+  "What are the purchase records for Bob Smith?"
   
 - **Processing a purchase**:  
   "John Doe wants to buy 2 Smartphones."
