@@ -1,15 +1,30 @@
+import logging
+import os
 import time
 import streamlit as st
 import sqlite3
 import altair as alt
-from langchain_core.messages import HumanMessage
+from dotenv import load_dotenv
 from backend.db_manager import DBManager
+from langchain_openai import AzureChatOpenAI
+
 from backend.sqlite_agent import (
-    recreate_agent,
     create_default_tools,
     create_extraction_chain,
-    create_llm,
 )
+# Add: Import framework classes
+from backend.frameworks.langgraph_framework import LangGraphFramework
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('agent_debug.log', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 st.set_page_config(layout="wide")
 
@@ -40,63 +55,105 @@ def refresh_data():
 if st.session_state.data is None:
     refresh_data()
 
-st.sidebar.header("Model Configuration")
-model_provider = st.sidebar.selectbox(
-    "Select Model Provider", ["OpenAI", "Ollama", "Bedrock"]
+# st.sidebar.header("Model Configuration")
+# model_provider = st.sidebar.selectbox(
+#     "Select Model Provider", ["OpenAI", "Ollama", "Bedrock"]
+# )
+
+# Add: Framework selector
+st.sidebar.header("Agent Framework")
+framework_choice = st.sidebar.selectbox(
+    "Select Agent Framework", 
+    ["LangGraph"],  # Currently only one option, will expand later
+    help="Choose the agent framework to use"
 )
 
+# Add: Initialize framework instance
+if "framework" not in st.session_state:
+    st.session_state.framework = LangGraphFramework()
 
-def openai_inputs():
-    api_key = st.sidebar.text_input("OpenAI API Key", type="password")
-    model_name = st.sidebar.text_input("Model Name", value="gpt-4o-mini")
-    return {"api_key": api_key, "model_name": model_name}
-
-
-def ollama_inputs():
-    model_name = st.sidebar.text_input("Model Name", value="llama3.2")
-    st.sidebar.warning(
-        "Please ensure you have pulled the specified model using Ollama locally."
-    )
-    return {"model_name": model_name}
+# Add: Display framework information
+with st.sidebar.expander("Framework Info", expanded=False):
+    framework_info = st.session_state.framework.get_framework_info()
+    st.write(f"**Name:** {framework_info['name']}")
+    st.write(f"**Description:** {framework_info['description']}")
+    st.write(f"**Features:** {', '.join(framework_info['features'])}")
 
 
-def bedrock_inputs():
-    aws_region = st.sidebar.text_input("AWS Region")
-    aws_access_key = st.sidebar.text_input("AWS Access Key", type="password")
-    aws_secret_key = st.sidebar.text_input("AWS Secret Access Key", type="password")
-    model_name = st.sidebar.text_input(
-        "Model Name", value="anthropic.claude-3-5-sonnet-20240620-v1:0"
-    )
-    return {
-        "aws_region": aws_region,
-        "aws_access_key": aws_access_key,
-        "aws_secret_key": aws_secret_key,
-        "model_name": model_name,
-    }
+# def openai_inputs():
+#     api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+#     model_name = st.sidebar.text_input("Model Name", value="gpt-4o-mini")
+#     return {"api_key": api_key, "model_name": model_name}
+
+
+# def ollama_inputs():
+#     model_name = st.sidebar.text_input("Model Name", value="llama3.2")
+#     st.sidebar.warning(
+#         "Please ensure you have pulled the specified model using Ollama locally."
+#     )
+#     return {"model_name": model_name}
+
+
+# def bedrock_inputs():
+#     aws_region = st.sidebar.text_input("AWS Region")
+#     aws_access_key = st.sidebar.text_input("AWS Access Key", type="password")
+#     aws_secret_key = st.sidebar.text_input("AWS Secret Access Key", type="password")
+#     model_name = st.sidebar.text_input(
+#         "Model Name", value="anthropic.claude-3-5-sonnet-20240620-v1:0"
+#     )
+#     return {
+#         "aws_region": aws_region,
+#         "aws_access_key": aws_access_key,
+#         "aws_secret_key": aws_secret_key,
+#         "model_name": model_name,
+#     }
 
 
 # Display appropriate inputs based on selected provider
-if model_provider == "OpenAI":
-    model_args = openai_inputs()
-elif model_provider == "Ollama":
-    model_args = ollama_inputs()
-else:  # Bedrock
-    model_args = bedrock_inputs()
+# if model_provider == "OpenAI":
+#     model_args = openai_inputs()
+# elif model_provider == "Ollama":
+#     model_args = ollama_inputs()
+# else:  # Bedrock
+#     model_args = bedrock_inputs()
 
 
 def create_agent():
     with st.spinner("Creating agent..."):
-        st.session_state.llm = create_llm(
-            provider=model_provider, model_args=model_args
+        # Create extraction chain and tools (still need these for tool creation)
+        # Use a temporary LLM just for tool setup
+        temp_llm = AzureChatOpenAI(
+            azure_endpoint=os.getenv("AZURE_ENDPOINT"),
+            api_key=os.getenv("AZURE_API_KEY"),
+            azure_deployment=os.getenv("AZURE_DEPLOYMENT", "gpt-4o"),
+            api_version=os.getenv("AZURE_API_VERSION", "2025-04-01-preview"),
+            temperature=0,
         )
-        st.session_state.extraction_chain = create_extraction_chain(
-            llm=st.session_state.llm
-        )
+        
+        st.session_state.extraction_chain = create_extraction_chain(llm=temp_llm)
         st.session_state.tools = create_default_tools(st.session_state.extraction_chain)
-        st.session_state.tool_descriptions = {
-            tool.name: tool.description for tool in st.session_state.tools
-        }
-        st.session_state.agent = recreate_agent()
+        # st.session_state.tool_descriptions = {
+        #     tool.name: tool.description for tool in st.session_state.tools
+        # }
+        
+        # Define system prompt
+        system_prompt = """You are a helpful and friendly AI agent designed to assist users with tasks related to managing customer and product information in an SQLite database.
+
+When a user asks you a question, always respond in a polite and friendly manner, guiding them through the process if necessary. If their request requires using one of your tools, call the tool and explain the results clearly and accurately. If the user's input is unclear, kindly ask them to clarify or provide more information.
+
+When returning information from the database, present it in an easy-to-understand format. If no relevant data is found, respond in a reassuring and supportive way, encouraging the user to try again or offer additional assistance.
+
+Remember to:
+- Always maintain a positive and friendly tone.
+- Be patient with users and ensure they feel supported throughout their interaction.
+- Provide helpful explanations after using the tools, summarizing the outcome or offering next steps.
+- Avoid technical jargon unless the user seems to expect or request it."""
+        
+        # Use framework to create agent (no LLM parameter needed)
+        st.session_state.agent = st.session_state.framework.create_agent(
+            tools=st.session_state.tools,
+            system_prompt=system_prompt
+        )
         st.session_state.agent_created = True
     st.success("Agent created successfully!")
     st.rerun()
@@ -221,6 +278,7 @@ with col2:
 prompt = st.chat_input("Type your message here...")
 
 if prompt:
+    logger.info(f"User prompt: {prompt}")
     with chat_container:
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -231,12 +289,18 @@ if prompt:
     with chat_container:
         with st.chat_message("assistant"):
             response = ""
-            for step in st.session_state.agent.stream(
-                {"messages": [HumanMessage(content=prompt)]}, stream_mode="updates"
-            ):
+            logger.info("Starting agent stream...")
+            # Change: Use framework's stream_execute method instead of direct agent.stream
+            for i, step in enumerate(st.session_state.framework.stream_execute(
+                agent=st.session_state.agent, 
+                message=prompt
+            )):
+                logger.debug(f"Stream step {i}: {type(step)} - {list(step.keys()) if isinstance(step, dict) else 'Not dict'}")
                 if "agent" in step:
+                    logger.info("Processing agent step")
                     messages = step["agent"]["messages"]
-                    for message in messages:
+                    for j, message in enumerate(messages):
+                        logger.debug(f"Agent message {j}: {type(message)}")
                         if message.tool_calls:
                             tool_call = message.tool_calls[0]
                             step_response = f'**Calling `{tool_call["name"]}` tool...**'
@@ -248,35 +312,39 @@ if prompt:
                             )
 
                 elif "tools" in step:
+                    logger.info("Processing tools step")
                     messages = step["tools"]["messages"]
-                    for message in messages:
-                        if "tool_call" in locals() and tool_call["name"] in [
-                            "ViewAllProducts",
-                            "ViewAllMembers",
-                        ]:
-                            step_response = (
-                                "**Tool Message:**"
-                                + "\n\n"
-                                + "Retrieving data from database..."
-                            )
-                            step_response = st.write_stream(
-                                response_generator(step_response)
-                            )
-                        else:
-                            step_response = (
-                                "**Tool Message:**" + "\n\n" + message.content
-                            )
-                            step_response = st.write_stream(
-                                response_generator(step_response)
-                            )
-                            refresh_data()
-
-                        # refresh data
-                        if "tool_call" in locals() and tool_call["name"] in [
-                            "ExtractAndWriteUserInfo",
-                            "Purchase",
-                        ]:
-                            st.success("Database updated! Data refreshed.")
+                    
+                    for j, message in enumerate(messages):
+                        logger.debug(f"Tool message {j}: {type(message)} - Tool: {message.name}")
+                        
+                        try:
+                            # Handle different tool types with appropriate display
+                            if message.name in ["ViewAllProducts", "ViewAllMembers"]:
+                                # For query tools, show "retrieving" message first
+                                step_response = "**Retrieving data from database...**"
+                                st.write_stream(response_generator(step_response))
+                                
+                                # Then display the actual results
+                                step_response = f"**Tool Result ({message.name}):**\n\n```\n{message.content}\n```"
+                                step_response = st.write_stream(response_generator(step_response))
+                                
+                            else:
+                                # For other tools, directly show results
+                                step_response = f"**Tool Message ({message.name}):**\n\n{message.content}"
+                                step_response = st.write_stream(response_generator(step_response))
+                                
+                                # Refresh data if it's a data-modifying tool
+                                if message.name in ["ExtractAndWriteUserInfo", "Purchase"]:
+                                    refresh_data()
+                                    st.success("✅ Database updated! Data refreshed.")
+                            
+                            logger.debug(f"Successfully processed tool message: {message.name}")
+                            
+                        except Exception as e:
+                            logger.error(f"Error processing tool message {message.name}: {e}", exc_info=True)
+                            step_response = f"**Tool Execution Error:** {str(e)}"
+                            step_response = st.write_stream(response_generator(step_response))
 
                 if response == "":
                     response += step_response
