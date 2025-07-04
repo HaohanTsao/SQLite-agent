@@ -231,7 +231,7 @@ class CrewAIFramework(BaseFramework):
                 model="azure/gpt-4o",
                 api_key=os.getenv("AZURE_API_KEY"),
                 base_url=os.getenv("AZURE_ENDPOINT"),
-                api_version=os.getenv("AZURE_API_VERSION", "2024-08-01-preview"),
+                api_version=os.getenv("AZURE_API_VERSION", "2024-04-01-preview"),
                 temperature=0.1,
                 stream=True  # Enable streaming for better event tracking
             )
