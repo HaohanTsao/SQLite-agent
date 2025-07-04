@@ -16,6 +16,7 @@ from backend.sqlite_agent import (
 from backend.frameworks.langgraph_framework import LangGraphFramework
 from backend.frameworks.autogen_framework import AutoGenFramework
 from backend.frameworks.semantic_kernel_framework import SemanticKernelFramework
+from backend.frameworks.crewai_framework import CrewAIFramework
 
 load_dotenv()
 
@@ -62,7 +63,7 @@ if st.session_state.data is None:
 st.sidebar.header("Agent Framework")
 framework_choice = st.sidebar.selectbox(
     "Select Agent Framework", 
-    ["LangGraph", "AutoGen", "Semantic Kernel"],  # Added Semantic Kernel
+    ["LangGraph", "AutoGen", "Semantic Kernel", "CrewAI"],  # Added Semantic Kernel
     help="Choose the agent framework to use"
 )
 
@@ -74,8 +75,10 @@ if "framework" not in st.session_state:
         st.session_state.framework = AutoGenFramework()
     elif framework_choice == "Semantic Kernel":
         st.session_state.framework = SemanticKernelFramework()
+    elif framework_choice == "CrewAI":
+        st.session_state.framework = CrewAIFramework()
     else:
-        st.session_state.framework = LangGraphFramework()  # Default fallback
+        st.session_state.framework = LangGraphFramework()
 
 # Add: Handle framework switching with Semantic Kernel
 if "current_framework" not in st.session_state:
@@ -88,7 +91,9 @@ elif st.session_state.current_framework != framework_choice:
         st.session_state.framework = AutoGenFramework()
     elif framework_choice == "Semantic Kernel":
         st.session_state.framework = SemanticKernelFramework()
-    st.session_state.agent_created = False  # Reset agent when framework changes
+    elif framework_choice == "CrewAI":
+        st.session_state.framework = CrewAIFramework()
+    st.session_state.agent_created = False
 
 # Add: Display framework information
 with st.sidebar.expander("Framework Info", expanded=False):
@@ -154,6 +159,16 @@ Remember to:
                 system_prompt=system_prompt
             )
             # Clear LangChain-specific state for Semantic Kernel
+            st.session_state.extraction_chain = None
+            st.session_state.tools = None
+            
+        elif st.session_state.framework.get_framework_name().startswith("CrewAI"):  # 新增
+            # CrewAI creates its own agents and tools with event-driven execution
+            st.session_state.agent = st.session_state.framework.create_agent(
+                tools=None,
+                system_prompt=system_prompt
+            )
+            # Clear LangChain-specific state for CrewAI
             st.session_state.extraction_chain = None
             st.session_state.tools = None
         
