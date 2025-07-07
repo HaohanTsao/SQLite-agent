@@ -1,4 +1,5 @@
 import os
+import time
 from typing import List, Any, Dict, Optional, Iterator
 from pydantic import BaseModel, Field
 from crewai import Agent, Crew, Process, Task, LLM
@@ -11,12 +12,19 @@ from crewai.utilities.events import (
 )
 from .base_framework import BaseFramework
 from backend.db_manager import DBManager
-import logging
+
+# Import our unified logging system
+from backend.utils.simple_logger import (
+    setup_simple_logger, 
+    ExecutionTimer, 
+    log_execution_time,
+    log_tokens,
+    log_user_input,
+    log_tool_usage
+)
 
 from dotenv import load_dotenv
 load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 
 class UserInfo(BaseModel):
@@ -36,39 +44,26 @@ class ProductInfo(BaseModel):
 class CrewAIEventListener(BaseEventListener):
     """Event listener to capture CrewAI execution events for streaming"""
     
-    def __init__(self):
+    def __init__(self, logger):
         super().__init__()
         self.events = []
         self.tool_calls = []
         self.tool_results = []
         self.agent_messages = []
+        self.logger = logger
         
     def setup_listeners(self, crewai_event_bus):
         """Set up event listeners for various CrewAI events"""
         
         @crewai_event_bus.on(ToolUsageStartedEvent)
         def on_tool_usage_started(source, event):
-            logger.info(f"Tool usage started: {event.tool_name}")
+            self.logger.info(f"Tool usage started: {event.tool_name}")
             self.tool_calls.append({
                 "name": event.tool_name,
                 "input": getattr(event, 'tool_input', ''),
                 "started": True
             })
             self.events.append(("tool_started", event))
-        
-        @crewai_event_bus.on(AgentExecutionStartedEvent) 
-        def on_agent_execution_started(source, event):
-            logger.info(f"Agent execution started: {event.agent_id}")
-            self.events.append(("agent_started", event))
-        
-        @crewai_event_bus.on(AgentExecutionCompletedEvent)
-        def on_agent_execution_completed(source, event):
-            logger.info(f"Agent execution completed: {event.agent_id}")
-            self.agent_messages.append({
-                "content": getattr(event, 'output', ''),
-                "agent_id": event.agent_id
-            })
-            self.events.append(("agent_completed", event))
     
     def clear_events(self):
         """Clear all captured events"""
@@ -87,21 +82,30 @@ class ExtractAndWriteUserInfoTool(BaseTool):
     
     def _run(self, text: str) -> str:
         """Extract user information and write to database"""
+        log_tool_usage(self.framework.logger, self.name, text)
+        
         try:
             user_info = self.framework._extract_user_info(text)
             db_manager = self.framework._initialize_db_manager()
             
             if not user_info.name:
-                return "❌ Could not extract user name from input."
+                result = "❌ Could not extract user name from input."
+                self.framework.logger.error("Tool failed: ExtractAndWriteUserInfo - no name extracted")
+                return result
             
             member = db_manager.get_member_by_name(user_info.name)
             if member:
-                return f"Member {user_info.name} already exists with ID: {member[0]}"
+                result = f"Member {user_info.name} already exists with ID: {member[0]}"
+                self.framework.logger.info("Tool completed: ExtractAndWriteUserInfo - member exists")
+                return result
             else:
                 db_manager.insert_member(user_info.name, user_info.email, user_info.age)
                 new_member = db_manager.get_member_by_name(user_info.name)
-                return f"Extracted and wrote user info: {new_member}"
+                result = f"Extracted and wrote user info: {new_member}"
+                self.framework.logger.info(f"Tool completed: ExtractAndWriteUserInfo - {user_info.name}")
+                return result
         except Exception as e:
+            self.framework.logger.error(f"Tool failed: ExtractAndWriteUserInfo - {e}")
             return f"❌ Error adding member: {str(e)}"
 
 class PurchaseRecordFetcherTool(BaseTool):
@@ -114,29 +118,38 @@ class PurchaseRecordFetcherTool(BaseTool):
     
     def _run(self, text: str) -> str:
         """Get purchase records for user"""
+        log_tool_usage(self.framework.logger, self.name, text)
+        
         try:
             user_info = self.framework._extract_user_info(text)
             db_manager = self.framework._initialize_db_manager()
             
             if not user_info.name:
-                return f"❌ Could not extract user name from input."
+                result = f"❌ Could not extract user name from input."
+                self.framework.logger.error("Tool failed: PurchaseRecordFetcher - no name extracted")
+                return result
             
             member = db_manager.get_member_by_name(user_info.name)
             if not member:
-                return f"No member found for name '{user_info.name}'"
+                result = f"No member found for name '{user_info.name}'"
+                self.framework.logger.error(f"Tool failed: PurchaseRecordFetcher - member {user_info.name} not found")
+                return result
             
             member_id = member[0]
             purchase_records = db_manager.get_member_records(member_id)
             
             if not purchase_records:
-                return f"No purchase records found for member {user_info.name} (ID: {member_id})"
+                result = f"No purchase records found for member {user_info.name} (ID: {member_id})"
+            else:
+                response = f"Purchase records for {user_info.name} (ID: {member_id}):\n"
+                for record in purchase_records:
+                    response += f"- Record ID: {record[0]}, Product: {record[1]}, Price: {record[2]}, Number: {record[3]}, Payment: {record[2]*record[3]}\n"
+                result = response
             
-            response = f"Purchase records for {user_info.name} (ID: {member_id}):\n"
-            for record in purchase_records:
-                response += f"- Record ID: {record[0]}, Product: {record[1]}, Price: {record[2]}, Number: {record[3]}, Payment: {record[2]*record[3]}\n"
-            
-            return response
+            self.framework.logger.info(f"Tool completed: PurchaseRecordFetcher - {user_info.name}")
+            return result
         except Exception as e:
+            self.framework.logger.error(f"Tool failed: PurchaseRecordFetcher - {e}")
             return f"❌ Error retrieving records: {str(e)}"
 
 class PurchaseTool(BaseTool):
@@ -149,33 +162,45 @@ class PurchaseTool(BaseTool):
     
     def _run(self, text: str) -> str:
         """Process purchase transaction"""
+        log_tool_usage(self.framework.logger, self.name, text)
+        
         try:
             user_info = self.framework._extract_user_info(text)
             product_info = self.framework._extract_product_info(text)
             db_manager = self.framework._initialize_db_manager()
             
             if user_info.name is None:
-                return "User information is incomplete."
+                result = "User information is incomplete."
+                self.framework.logger.error("Tool failed: Purchase - no user name")
+                return result
             if product_info.name is None:
-                return "Product information is incomplete."
+                result = "Product information is incomplete."
+                self.framework.logger.error("Tool failed: Purchase - no product name")
+                return result
             
             member = db_manager.get_member_by_name(user_info.name)
             
             if not member:
                 db_manager.insert_member(user_info.name, user_info.email, user_info.age)
                 member = db_manager.get_member_by_name(user_info.name)
+                self.framework.logger.info(f"Added new member during purchase: {user_info.name}")
             
             member_id = member[0]
             
             product = db_manager.get_product_by_name(product_info.name)
             if not product:
-                return f"Sorry, the product '{product_info.name}' does not exist."
+                result = f"Sorry, the product '{product_info.name}' does not exist."
+                self.framework.logger.error(f"Tool failed: Purchase - product {product_info.name} not found")
+                return result
             
             product_id = product[0]
             db_manager.insert_record(member_id, product_id, product_info.number)
             
-            return f"Purchase successful! Member {user_info.name} bought {product_info.number} {product_info.name}(s)."
+            result = f"Purchase successful! Member {user_info.name} bought {product_info.number} {product_info.name}(s)."
+            self.framework.logger.info(f"Tool completed: Purchase - {user_info.name} bought {product_info.name}")
+            return result
         except Exception as e:
+            self.framework.logger.error(f"Tool failed: Purchase - {e}")
             return f"❌ Error processing purchase: {str(e)}"
 
 class ViewAllProductsTool(BaseTool):
@@ -188,11 +213,16 @@ class ViewAllProductsTool(BaseTool):
     
     def _run(self, text: str) -> str:
         """Return all products from database"""
+        log_tool_usage(self.framework.logger, self.name)
+        
         try:
             db_manager = self.framework._initialize_db_manager()
             products = db_manager.list_all_products()
-            return products.to_string(index=False)
+            result = products.to_string(index=False)
+            self.framework.logger.info("Tool completed: ViewAllProducts")
+            return result
         except Exception as e:
+            self.framework.logger.error(f"Tool failed: ViewAllProducts - {e}")
             return f"Error retrieving products: {e}"
 
 class ViewAllMembersTool(BaseTool):
@@ -205,17 +235,24 @@ class ViewAllMembersTool(BaseTool):
     
     def _run(self, text: str) -> str:
         """Return all members from database"""
+        log_tool_usage(self.framework.logger, self.name)
+        
         try:
             db_manager = self.framework._initialize_db_manager()
             members = db_manager.list_all_members()
-            return members.to_string(index=False)
+            result = members.to_string(index=False)
+            self.framework.logger.info("Tool completed: ViewAllMembers")
+            return result
         except Exception as e:
+            self.framework.logger.error(f"Tool failed: ViewAllMembers - {e}")
             return f"Error retrieving members: {e}"
 
 class CrewAIFramework(BaseFramework):
     """CrewAI framework with native event listening and structured extraction"""
     
     def __init__(self):
+        # Setup unified logger
+        self.logger = setup_simple_logger("CrewAI")
         self.agent = None
         self.crew = None
         self.current_task = None
@@ -223,18 +260,20 @@ class CrewAIFramework(BaseFramework):
         self.llm = None
         self.extraction_agents = {}
         self.event_listener = None
+        self.logger.info("CrewAI framework initialized")
     
     def _initialize_azure_llm(self):
         """Initialize Azure OpenAI LLM with streaming"""
         if self.llm is None:
-            self.llm = LLM(
-                model="azure/gpt-4o",
-                api_key=os.getenv("AZURE_API_KEY"),
-                base_url=os.getenv("AZURE_ENDPOINT"),
-                api_version=os.getenv("AZURE_API_VERSION", "2024-04-01-preview"),
-                temperature=0.1,
-                stream=True  # Enable streaming for better event tracking
-            )
+            with ExecutionTimer(self.logger, "Azure LLM initialization"):
+                self.llm = LLM(
+                    model="azure/gpt-4o",
+                    api_key=os.getenv("AZURE_API_KEY"),
+                    base_url=os.getenv("AZURE_ENDPOINT"),
+                    api_version=os.getenv("AZURE_API_VERSION", "2024-04-01-preview"),
+                    temperature=0.1,
+                    stream=True  # Enable streaming for better event tracking
+                )
         return self.llm
     
     def _initialize_db_manager(self):
@@ -273,6 +312,9 @@ class CrewAIFramework(BaseFramework):
     
     def _extract_user_info(self, text: str) -> UserInfo:
         """Extract user information using CrewAI structured output"""
+        start_time = time.time()
+        self.logger.info("Starting user info extraction")
+        
         try:
             extraction_agents = self._create_extraction_agents()
             
@@ -292,17 +334,24 @@ class CrewAIFramework(BaseFramework):
             
             result = extraction_crew.kickoff()
             
+            execution_time = time.time() - start_time
+            self.logger.info(f"User extraction completed in {execution_time:.2f}s")
+            
             if hasattr(result, 'pydantic') and result.pydantic:
                 return result.pydantic
             else:
                 return self._fallback_user_extraction(text)
                 
         except Exception as e:
-            logger.error(f"Error in user extraction: {e}")
+            execution_time = time.time() - start_time
+            self.logger.error(f"Error in user extraction after {execution_time:.2f}s: {e}")
             return self._fallback_user_extraction(text)
     
     def _extract_product_info(self, text: str) -> ProductInfo:
         """Extract product information using CrewAI structured output"""
+        start_time = time.time()
+        self.logger.info("Starting product info extraction")
+        
         try:
             extraction_agents = self._create_extraction_agents()
             
@@ -322,13 +371,17 @@ class CrewAIFramework(BaseFramework):
             
             result = extraction_crew.kickoff()
             
+            execution_time = time.time() - start_time
+            self.logger.info(f"Product extraction completed in {execution_time:.2f}s")
+            
             if hasattr(result, 'pydantic') and result.pydantic:
                 return result.pydantic
             else:
                 return self._fallback_product_extraction(text)
                 
         except Exception as e:
-            logger.error(f"Error in product extraction: {e}")
+            execution_time = time.time() - start_time
+            self.logger.error(f"Error in product extraction after {execution_time:.2f}s: {e}")
             return self._fallback_product_extraction(text)
     
     def _fallback_user_extraction(self, text: str) -> UserInfo:
@@ -395,14 +448,17 @@ class CrewAIFramework(BaseFramework):
         
         return tools    
  
+    @log_execution_time("Agent Creation")
     def create_agent(self, tools: List, system_prompt: str):
         """Create CrewAI agent with event listening and structured extraction"""
+        self.logger.info("CrewAI starting agent creation")
+        
         # Initialize components
         azure_llm = self._initialize_azure_llm()
         self._create_extraction_agents()
         
-        # Create event listener
-        self.event_listener = CrewAIEventListener()
+        # Create event listener with logger
+        self.event_listener = CrewAIEventListener(self.logger)
         
         # Create database tools with structured extraction
         crewai_tools = self._create_database_tools()
@@ -426,10 +482,17 @@ class CrewAIFramework(BaseFramework):
             verbose=True
         )
         
+        self.logger.info("CrewAI agent created successfully")
         return self.crew
 
     def stream_execute(self, agent, message: str) -> Iterator[Dict[str, Any]]:
         """Execute CrewAI with dual output: raw tool results + AI intelligent response"""
+        start_time = time.time()
+        
+        # Log user input
+        log_user_input(self.logger, message)
+        self.logger.info("CrewAI starting stream execution")
+        
         try:
             # Clear previous events
             if self.event_listener:
@@ -465,11 +528,21 @@ class CrewAIFramework(BaseFramework):
                 tool._run = create_wrapper(tool_name, original_run)
             
             try:
-                # Execute the crew (this will trigger events and capture tool outputs)
+                # Execute the crew
                 result = self.crew.kickoff()
+                
+                execution_time = time.time() - start_time
                 
                 # Get the final AI response
                 ai_response = result.raw if hasattr(result, 'raw') else str(result)
+                token_usage = result.token_usage
+
+                log_tokens(
+                    "CrewAI",
+                    prompt_tokens=int(token_usage.prompt_tokens),
+                    completion_tokens=int(token_usage.completion_tokens),
+                    total_tokens=int(token_usage.total_tokens)
+                )
                 
                 # Process captured events to create streaming output
                 events_processed = []
@@ -536,7 +609,9 @@ class CrewAIFramework(BaseFramework):
                             }]
                         }
                     }
-            
+                
+                self.logger.info(f"CrewAI completed execution in {execution_time:.2f}s")
+                
             finally:
                 # Restore original _run methods
                 for tool in self.agent.tools:
@@ -545,7 +620,8 @@ class CrewAIFramework(BaseFramework):
                         tool._run = original_run_methods[tool_name]
                     
         except Exception as e:
-            logger.error(f"Error in stream_execute: {e}", exc_info=True)
+            execution_time = time.time() - start_time
+            self.logger.error(f"CrewAI execution failed after {execution_time:.2f}s: {e}")
             yield {
                 "agent": {
                     "messages": [{

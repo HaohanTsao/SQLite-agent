@@ -2,6 +2,7 @@ import os
 import asyncio
 import json
 import re
+import time
 from typing import List, Any, Dict, Optional
 from pydantic import BaseModel, Field
 from semantic_kernel import Kernel
@@ -12,6 +13,16 @@ from semantic_kernel.contents import ChatHistory, FunctionResultContent, Streami
 from semantic_kernel.functions import KernelArguments
 from .base_framework import BaseFramework
 from backend.db_manager import DBManager
+
+# Import our unified logging system
+from backend.utils.simple_logger import (
+    setup_simple_logger, 
+    ExecutionTimer, 
+    log_execution_time,
+    log_tokens,
+    log_user_input,
+    log_tool_usage
+)
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -33,13 +44,17 @@ class ProductInfo(BaseModel):
 class SemanticKernelPlugin:
     """Semantic Kernel plugin for SQLite database operations"""
     
-    def __init__(self, db_manager: DBManager, kernel: Kernel, chat_completion):
+    def __init__(self, db_manager: DBManager, kernel: Kernel, chat_completion, logger):
         self.db_manager = db_manager
         self.kernel = kernel
         self.chat_completion = chat_completion
+        self.logger = logger  # Add logger reference
 
     async def _extract_info(self, text: str, info_type: str, model_class: BaseModel) -> BaseModel:
         """Extract structured information using Semantic Kernel with LLM structured output"""
+        start_time = time.time()
+        self.logger.info(f"Starting structured extraction for {info_type}")
+        
         try:
             # Create prompt for information extraction
             if info_type == "user":
@@ -85,7 +100,9 @@ Extract the following information:
             # Invoke the function
             result = await self.kernel.invoke(extraction_function)
             
-            # Parse the structured output
+            execution_time = time.time() - start_time
+            self.logger.info(f"Extraction completed in {execution_time:.2f}s")
+            
             if hasattr(result, 'value') and result.value:
                 if isinstance(result.value, list) and len(result.value) > 0:
                     content = result.value[0].content
@@ -103,7 +120,8 @@ Extract the following information:
                 return model_class()
                 
         except Exception as e:
-            print(f"Structured extraction error: {e}")
+            execution_time = time.time() - start_time
+            self.logger.error(f"Structured extraction failed after {execution_time:.2f}s: {e}")
             # Fallback to manual extraction
             return self._fallback_extraction(text, info_type, model_class)
 
@@ -162,15 +180,21 @@ Extract the following information:
     )
     async def add_member(self, user_input: str) -> str:
         """Add a new member by extracting info from natural language."""
+        log_tool_usage(self.logger, "add_member", user_input)
+        
         try:
             user_info = await self._extract_info(user_input, "user", UserInfo)
             
             if not user_info.name:
-                return "❌ Could not extract user name from input."
+                result = "❌ Could not extract user name from input."
+                self.logger.error("Tool failed: add_member - no name extracted")
+                return result
 
             existing_member = self.db_manager.get_member_by_name(user_info.name)
             if existing_member:
-                return f"Member {user_info.name} already exists with ID: {existing_member[0]}"
+                result = f"Member {user_info.name} already exists with ID: {existing_member[0]}"
+                self.logger.info("Tool completed: add_member - member exists")
+                return result
 
             self.db_manager.insert_member(
                 user_info.name, 
@@ -179,9 +203,12 @@ Extract the following information:
             )
             
             new_member = self.db_manager.get_member_by_name(user_info.name)
-            return f"✅ Successfully added member: {user_info.name} (ID: {new_member[0]})"
+            result = f"✅ Successfully added member: {user_info.name} (ID: {new_member[0]})"
+            self.logger.info(f"Tool completed: add_member - {user_info.name}")
+            return result
             
         except Exception as e:
+            self.logger.error(f"Tool failed: add_member - {e}")
             return f"❌ Error adding member: {str(e)}"
 
     @kernel_function(
@@ -190,21 +217,27 @@ Extract the following information:
     )
     async def make_purchase(self, purchase_input: str) -> str:
         """Process a purchase by extracting user and product info from natural language."""
+        log_tool_usage(self.logger, "make_purchase", purchase_input)
+        
         try:
             user_info = await self._extract_info(purchase_input, "user", UserInfo)
             product_info = await self._extract_info(purchase_input, "product", ProductInfo)
             
             if not user_info.name:
+                self.logger.error("Tool failed: make_purchase - no user name")
                 return "❌ Could not extract user name from input."
             if not product_info.name:
+                self.logger.error("Tool failed: make_purchase - no product name")
                 return "❌ Could not extract product name from input."
 
             member = self.db_manager.get_member_by_name(user_info.name)
             if not member:
+                self.logger.error(f"Tool failed: make_purchase - member {user_info.name} not found")
                 return f"❌ Member '{user_info.name}' not found. Please add member first."
 
             product = self.db_manager.get_product_by_name(product_info.name)
             if not product:
+                self.logger.error(f"Tool failed: make_purchase - product {product_info.name} not found")
                 return f"❌ Product '{product_info.name}' not found."
             
             member_id = member[0]
@@ -213,9 +246,12 @@ Extract the following information:
             
             self.db_manager.insert_record(member_id, product_id, quantity)
             
-            return f"✅ Purchase successful! {user_info.name} bought {quantity} {product_info.name}(s)."
+            result = f"✅ Purchase successful! {user_info.name} bought {quantity} {product_info.name}(s)."
+            self.logger.info(f"Tool completed: make_purchase - {user_info.name} bought {product_info.name}")
+            return result
             
         except Exception as e:
+            self.logger.error(f"Tool failed: make_purchase - {e}")
             return f"❌ Error processing purchase: {str(e)}"
 
     @kernel_function(
@@ -224,29 +260,36 @@ Extract the following information:
     )
     async def get_purchase_history(self, user_input: str) -> str:
         """Get purchase history by extracting member name from natural language."""
+        log_tool_usage(self.logger, "get_purchase_history", user_input)
+        
         try:
             user_info = await self._extract_info(user_input, "user", UserInfo)
             
             if not user_info.name:
+                self.logger.error("Tool failed: get_purchase_history - no user name")
                 return "❌ Could not extract user name from input."
             
             member = self.db_manager.get_member_by_name(user_info.name)
             if not member:
+                self.logger.error(f"Tool failed: get_purchase_history - member {user_info.name} not found")
                 return f"❌ Member '{user_info.name}' not found."
             
             member_id = member[0]
             records = self.db_manager.get_member_records(member_id)
             
             if not records:
-                return f"No purchase records found for {user_info.name}."
+                result = f"No purchase records found for {user_info.name}."
+            else:
+                response = f"📋 Purchase records for {user_info.name}:\n"
+                for record in records:
+                    response += f"• Product: {record[1]}, Price: ${record[2]}, Quantity: {record[3]}, Total: ${record[4]}\n"
+                result = response
             
-            response = f"📋 Purchase records for {user_info.name}:\n"
-            for record in records:
-                response += f"• Product: {record[1]}, Price: ${record[2]}, Quantity: {record[3]}, Total: ${record[4]}\n"
-            
-            return response
+            self.logger.info(f"Tool completed: get_purchase_history - {user_info.name}")
+            return result
             
         except Exception as e:
+            self.logger.error(f"Tool failed: get_purchase_history - {e}")
             return f"❌ Error retrieving records: {str(e)}"
 
     @kernel_function(
@@ -255,10 +298,15 @@ Extract the following information:
     )
     async def view_all_members(self) -> str:
         """Return all members from the SQLite database."""
+        log_tool_usage(self.logger, "view_all_members")
+        
         try:
             members = self.db_manager.list_all_members()
-            return f"👥 All Members:\n{members.to_string(index=False)}"
+            result = f"👥 All Members:\n{members.to_string(index=False)}"
+            self.logger.info("Tool completed: view_all_members")
+            return result
         except Exception as e:
+            self.logger.error(f"Tool failed: view_all_members - {e}")
             return f"❌ Error retrieving members: {str(e)}"
 
     @kernel_function(
@@ -267,10 +315,15 @@ Extract the following information:
     )
     async def view_all_products(self) -> str:
         """Return all products from the SQLite database."""
+        log_tool_usage(self.logger, "view_all_products")
+        
         try:
             products = self.db_manager.list_all_products()
-            return f"📦 All Products:\n{products.to_string(index=False)}"
+            result = f"📦 All Products:\n{products.to_string(index=False)}"
+            self.logger.info("Tool completed: view_all_products")
+            return result
         except Exception as e:
+            self.logger.error(f"Tool failed: view_all_products - {e}")
             return f"❌ Error retrieving products: {str(e)}"
 
 
@@ -278,37 +331,44 @@ class SemanticKernelFramework(BaseFramework):
     """Semantic Kernel framework implementation with Azure OpenAI"""
     
     def __init__(self):
+        # Setup unified logger
+        self.logger = setup_simple_logger("SemanticKernel")
         self.kernel = None
         self.chat_completion = None
         self.plugin = None
+        self.logger.info("Semantic Kernel framework initialized")
 
     def _initialize_kernel(self):
         """Initialize Semantic Kernel with Azure OpenAI"""
         if self.kernel is None:
-            self.kernel = Kernel()
-            
-            # Add Azure OpenAI Chat Completion service
-            self.chat_completion = AzureChatCompletion(
-                service_id="semantic_kernel",
-                deployment_name=os.getenv("AZURE_DEPLOYMENT", "gpt-4o"),
-                endpoint=os.getenv("AZURE_ENDPOINT"),
-                api_key=os.getenv("AZURE_API_KEY"),
-                api_version=os.getenv("AZURE_API_VERSION", "2025-04-01-preview"),
-            )
-            
-            self.kernel.add_service(self.chat_completion)
-            
-            # Initialize database manager and plugin
-            db_manager = DBManager("customer_database.db")
-            self.plugin = SemanticKernelPlugin(db_manager, self.kernel, self.chat_completion)
-            
-            # Add plugin to kernel
-            self.kernel.add_plugin(self.plugin, plugin_name="SQLitePlugin")
+            with ExecutionTimer(self.logger, "Kernel initialization"):
+                self.kernel = Kernel()
+                
+                # Add Azure OpenAI Chat Completion service
+                self.chat_completion = AzureChatCompletion(
+                    service_id="semantic_kernel",
+                    deployment_name=os.getenv("AZURE_DEPLOYMENT", "gpt-4o"),
+                    endpoint=os.getenv("AZURE_ENDPOINT"),
+                    api_key=os.getenv("AZURE_API_KEY"),
+                    api_version=os.getenv("AZURE_API_VERSION", "2025-04-01-preview"),
+                )
+                
+                self.kernel.add_service(self.chat_completion)
+                
+                # Initialize database manager and plugin with logger
+                db_manager = DBManager("customer_database.db")
+                self.plugin = SemanticKernelPlugin(db_manager, self.kernel, self.chat_completion, self.logger)
+                
+                # Add plugin to kernel
+                self.kernel.add_plugin(self.plugin, plugin_name="SQLitePlugin")
         
         return self.kernel
 
+    @log_execution_time("Agent Creation")
     def create_agent(self, tools: List, system_prompt: str):
         """Create Semantic Kernel agent with database plugin and function calling"""
+        self.logger.info("Semantic Kernel starting agent creation")
+        
         kernel = self._initialize_kernel()
         
         # Store system prompt for later use
@@ -343,15 +403,26 @@ Assistant: """,
             prompt_execution_settings=execution_settings,
         )
         
+        self.logger.info("Semantic Kernel agent created successfully")
         return kernel
 
     def stream_execute(self, agent, message: str):
         """Execute using Semantic Kernel's native streaming and function calling"""
+        start_time = time.time()
+        
+        # Log user input
+        log_user_input(self.logger, message)
+        self.logger.info("Semantic Kernel starting stream execution")
+        
         try:
             async def execute_with_streaming():
                 try:
                     # Create chat history for context
                     chat_history = ChatHistory()
+                    
+                    # Track token usage
+                    total_prompt_tokens = 0
+                    total_completion_tokens = 0
                     
                     # Use streaming invoke to get function call visibility
                     stream = self.kernel.invoke_stream(
@@ -368,13 +439,35 @@ Assistant: """,
                     async for chunk in stream:
                         if isinstance(chunk, list):
                             for item in chunk:
+                                # Check if item has metadata with token usage
+                                if hasattr(item, 'metadata') and item.metadata:
+                                    if item.metadata['usage']:
+                                        total_prompt_tokens += item.metadata['usage'].prompt_tokens
+                                        total_completion_tokens += item.metadata['usage'].completion_tokens
+                                
                                 await self._process_stream_item(item, function_calls, function_results, chat_content)
                         else:
+                            # Check chunk for metadata
+                            if hasattr(chunk, 'metadata') and chunk.metadata and item.metadata['usage'] != None:
+                                usage = chunk.metadata['usage']
+                                total_prompt_tokens += usage.prompt_tokens
+                                total_completion_tokens += usage.completion_tokens
+                            
                             await self._process_stream_item(chunk, function_calls, function_results, chat_content)
+                    
+                    # Log token usage if available
+                    if total_prompt_tokens > 0 or total_completion_tokens > 0:
+                        log_tokens(
+                            "SemanticKernel",
+                            prompt_tokens=total_prompt_tokens,
+                            completion_tokens=total_completion_tokens,
+                            total_tokens=total_prompt_tokens + total_completion_tokens
+                        )
                     
                     return function_calls, function_results, chat_content
                         
                 except Exception as e:
+                    self.logger.error(f"Error in streaming execution: {e}")
                     return [], [], [f"Error executing with streaming: {str(e)}"]
             
             # Run the async function
@@ -420,11 +513,16 @@ Assistant: """,
                         }]
                     }
                 }
+                
+                execution_time = time.time() - start_time
+                self.logger.info(f"Semantic Kernel completed execution in {execution_time:.2f}s")
                     
             finally:
                 loop.close()
                 
         except Exception as e:
+            execution_time = time.time() - start_time
+            self.logger.error(f"Semantic Kernel execution failed after {execution_time:.2f}s: {e}")
             yield {
                 "agent": {
                     "messages": [{
@@ -460,7 +558,7 @@ Assistant: """,
                 chat_content.append(str(item.content))
                 
         except Exception as e:
-            print(f"Error processing stream item: {e}")
+            self.logger.error(f"Error processing stream item: {e}")
             # Continue processing even if one item fails
 
     def get_framework_name(self) -> str:
