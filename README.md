@@ -1,6 +1,7 @@
 # SQLite-agent: Multi-Framework Comparison Platform
 
-<img width="1117" alt="SQLite-agent" src="https://github.com/user-attachments/assets/c00d28b7-f6ef-4866-a45d-2c1fd095a975">
+![image](https://github.com/user-attachments/assets/24ee6aa3-d571-4972-8ff6-afb6791d47f9)
+
 
 A comprehensive platform for comparing different AI agent frameworks using the same SQLite database operations. Test and evaluate **LangGraph**, **AutoGen**, **Semantic Kernel**, and **CrewAI** frameworks side-by-side to understand their unique strengths and characteristics.
 
